@@ -476,8 +476,11 @@ function update() {
   $('shopTotalK').textContent = r.byPacks ? 'Product cost (whole packs)' : 'Product cost this event';
   $('shopHint').textContent = r.byPacks ? 'Each event pays for every pack you buy. Change this in Settings.' : 'Each event pays for what it uses (plus the buffer). Leftovers carry to your next event.';
   const left = r.shoppingTrip - r.list.reduce((s, i) => s + (i.usedCost || 0), 0);
+  const tr = d.trip;
   $('shopTrip').innerHTML = `<span class="m">Shopping trip (whole packs)</span><span class="n">${money(r.shoppingTrip, 2)}</span>` +
-    (left > 0.005 ? `<span class="m">Left over for next time</span><span class="n">${money(left, 2)}</span>` : '');
+    (left > 0.005 ? `<span class="m">Left over for next time</span><span class="n">${money(left, 2)}</span>` : '') +
+    (tr ? `<span class="m">${tr.done ? 'Actually spent' : 'Trip in progress'} · ${esc(tr.date || '')}</span><span class="n">${money(tripSpent(tr), 2)}</span>` : '');
+  $('startTrip').textContent = tr && !tr.done ? 'Continue trip' : 'Shopping trip';
   $('shopPerGuest').textContent = g > 0 ? `${money(r.shopping / g, 2)} / guest` : '';
   const byStore = {};
   r.list.filter(i => i.packs > 0).forEach(i => (byStore[i.lib.store || 'Other'] ||= []).push(i));
@@ -668,14 +671,18 @@ $('newEvent').onclick = async () => {
 };
 function renderEvents() {
   const ev = Object.values(state.events), won = ev.filter(e => e.status === 'booked' || e.status === 'paid');
-  const rev = won.reduce((s, e) => s + num(e.price), 0), prof = won.reduce((s, e) => s + num(e.profit), 0);
+  const profOf = e => e.actuals ? num(e.actuals.profit) : num(e.profit);
+  const rev = won.reduce((s, e) => s + num(e.price), 0), prof = won.reduce((s, e) => s + profOf(e), 0);
   $('evRevenue').textContent = money(rev); $('evProfit').textContent = money(prof);
-  $('evMargin').textContent = rev > 0 ? pct(prof / rev) : '—'; $('evOpen').textContent = ev.filter(e => e.status === 'quoted').length;
+  const checked = ev.filter(e => e.actuals);
+  $('evMarginK').textContent = checked.length ? `Actual margin (${checked.length})` : 'Avg margin';
+  const cSub = checked.reduce((s, e) => s + num(e.actuals.subtotal), 0);
+  $('evMargin').textContent = checked.length ? (cSub > 0 ? pct(checked.reduce((s, e) => s + num(e.actuals.profit), 0) / cSub) : '—') : rev > 0 ? pct(prof / rev) : '—'; $('evOpen').textContent = ev.filter(e => e.status === 'quoted').length;
   $('evList').innerHTML = ev.length ? ev.sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(e => `
     <button class="li" data-ev="${esc(e.id)}"><div class="main"><div class="t1">${esc(e.client || 'Unnamed client')}</div>
       <div class="t2">${esc(e.date || 'no date')} · ${esc(e.cart)} · ${e.guests} guests</div></div>
       <span class="chip ${esc(e.status)}">${esc(e.status)}</span>
-      <div class="rt">${money(e.price)}<small>${money(e.profit)} · ${pct(e.margin)}</small></div></button>`).join('')
+      <div class="rt">${money(e.price)}<small>${e.actuals ? `actual ${money(e.actuals.profit)} · ${pct(e.actuals.margin)}` : `est. ${money(e.profit)} · ${pct(e.margin)}`}</small></div></button>`).join('')
     : '<div class="empty">No saved events yet. Build a quote and tap Save on the event step.</div>';
 }
 $('evList').addEventListener('click', e => {
@@ -684,10 +691,12 @@ $('evList').addEventListener('click', e => {
   openSheet({ title: ev.client || 'Unnamed client', body: `
     <div class="lines"><span class="m">Date</span><span class="n">${esc(ev.date || '—')}</span><span class="m">Cart</span><span class="n">${esc(ev.cart)}</span>
     <span class="m">Guests</span><span class="n">${ev.guests}</span><span class="m">Quote</span><span class="n">${money(ev.price, 2)}</span>
-    <span class="m">Profit</span><span class="n">${money(ev.profit, 2)} · ${pct(ev.margin)}</span></div>
+    <span class="m">Estimated profit</span><span class="n">${money(ev.profit, 2)} · ${pct(ev.margin)}</span>
+    ${ev.actuals ? `<span class="m">Actual profit</span><span class="n" style="color:${ev.actuals.profit < 0 ? 'var(--bad)' : 'var(--good)'}">${money(ev.actuals.profit, 2)} · ${pct(ev.actuals.margin)}</span>` : ''}</div>
     <label class="f" style="margin-top:16px">Status<select id="evStatus">${['quoted', 'booked', 'paid', 'lost'].map(s => `<option ${s === ev.status ? 'selected' : ''}>${s}</option>`).join('')}</select></label>`,
     buttons: [{ label: 'Delete', cls: 'danger', onClick: async () => { closeSheet(); if (await ask('Delete this saved event?', 'Delete', 'Cancel', true)) { delete state.events[ev.id]; if (D().eventId === ev.id) { D().eventId = null; markDirty('draft'); } markDirty('event', ev.id); renderEvents(); update(); } } },
       { spacer: true },
+      { label: ev.actuals ? 'Edit after-event check' : 'After-event check', onClick: () => { closeSheet(); openActuals(ev.id); } },
       { label: 'Open quote', onClick: () => { closeSheet(); if (ev.draft) { state.draft = normalize({ ...state, draft: clone(ev.draft) }).draft; state.draft.eventId = ev.id; markDirty('draft'); renderAll(); } showStep('pricing'); } },
       { label: 'Save', cls: 'primary', onClick: () => { ev.status = $('evStatus').value; markDirty('event', ev.id); closeSheet(); renderEvents(); } }] });
 });
@@ -695,6 +704,152 @@ $('copyCsv').onclick = () => {
   const rows = [['date', 'client', 'cart', 'guests', 'quote', 'cost', 'profit', 'margin', 'status']].concat(Object.values(state.events).map(e => [e.date, e.client, e.cart, e.guests, num(e.price).toFixed(2), num(e.cost).toFixed(2), num(e.profit).toFixed(2), (num(e.margin) * 100).toFixed(1) + '%', e.status]));
   copy(rows.map(r => r.map(c => String(c ?? '').replace(/[\t\n]/g, ' ')).join('\t')).join('\n'), 'Copied — paste into Google Sheets or Excel');
 };
+
+// ---------- shopping trip ----------
+const tripSpent = tr => (tr?.items || []).filter(i => i.got).reduce((s, i) => s + num(i.packs) * num(i.price), 0);
+function openTrip() {
+  const d = D(), r = calc();
+  const planned = r.list.filter(i => i.lib && i.packs > 0).map(i => ({ ing: i.ing, packs: i.packs, price: num(i.lib.price), got: false }));
+  if (!d.trip || d.trip.done) d.trip = { date: today(), items: planned, done: false };
+  else planned.forEach(p => { if (!d.trip.items.some(x => x.ing === p.ing)) d.trip.items.push(p); });
+  markDirty('draft');
+  const tr = d.trip, plannedTotal = planned.reduce((s, i) => s + i.packs * i.price, 0);
+  const rows = () => {
+    const byStore = {};
+    tr.items.forEach((it, i) => { const lib = state.library[it.ing]; if (lib) (byStore[lib.store || 'Other'] ||= []).push([it, i, lib]); });
+    return Object.keys(byStore).sort().map(st => `<div class="group-h">${esc(st)}</div>` + byStore[st].map(([it, i, lib]) => `
+      <div class="trip-row ${it.got ? 'got' : ''}" data-t="${i}">
+        <input type="checkbox" data-tk="got" ${it.got ? 'checked' : ''} aria-label="Got it">
+        <div><div class="tn">${esc(lib.name)}</div><div class="tm">${qty(lib.pack)} ${esc(lib.unit)} per pack${lib.est ? ' · est. price' : ''}</div></div>
+        <div class="tf"><input data-tk="packs" type="number" inputmode="numeric" min="0" value="${esc(it.packs)}" aria-label="Packs"> packs ×
+          <span class="money"><input data-tk="price" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(it.price)}" aria-label="Price per pack"></span>
+          <b data-tt="${i}" style="color:var(--text)">${money(num(it.packs) * num(it.price), 2)}</b></div>
+      </div>`).join('')).join('') || '<div class="empty">Nothing to buy — add ingredients to the shopping list first.</div>';
+  };
+  const sum = () => { const got = tr.items.filter(i => i.got).length; $('tripSum').innerHTML = `<div class="lines"><span class="m">Checked off</span><span class="n">${got} of ${tr.items.length}</span><span class="m">Spent so far</span><span class="n">${money(tripSpent(tr), 2)}</span><span class="m">Planned</span><span class="n">${money(plannedTotal, 2)}</span></div>`; };
+  const body = openSheet({ title: 'Shopping trip', body: `<div class="trip-sum" id="tripSum"></div><p class="hint" style="margin-top:10px">Tick items as they go in the cart. Change the price if the shelf price is different — it updates your ingredient list when you finish.</p><div id="tripRows">${rows()}</div>`,
+    buttons: [{ label: 'Close' }, { spacer: true }, { label: 'Finish trip', cls: 'primary', onClick: finish }] });
+  sum();
+  let t = null;
+  body.addEventListener('input', e => {
+    const row = e.target.closest('[data-t]'); if (!row) return;
+    const it = tr.items[+row.dataset.t], k = e.target.dataset.tk;
+    if (k === 'got') { it.got = e.target.checked; row.classList.toggle('got', it.got); } else it[k] = num(e.target.value);
+    body.querySelector(`[data-tt="${row.dataset.t}"]`).textContent = money(num(it.packs) * num(it.price), 2);
+    sum(); clearTimeout(t); t = setTimeout(() => { markDirty('draft'); update(); }, 400);
+  });
+  function finish() {
+    let changed = 0;
+    tr.items.filter(i => i.got).forEach(i => {
+      const lib = state.library[i.ing]; if (!lib) return;
+      if (Math.abs(num(lib.price) - num(i.price)) > 0.004) { lib.price = num(i.price); changed++; }
+      lib.est = false; lib.checked = today(); markDirty('ingredient', lib.id);
+    });
+    tr.done = true; tr.spent = tripSpent(tr); tr.date = today();
+    if (d.eventId && state.events[d.eventId]) { state.events[d.eventId].trip = clone(tr); markDirty('event', d.eventId); }
+    markDirty('draft'); closeSheet(); renderAll();
+    toast(`Trip saved · ${money(tr.spent, 2)} spent${changed ? ` · ${changed} price${changed > 1 ? 's' : ''} updated` : ''}`);
+  }
+}
+$('startTrip').onclick = openTrip;
+
+// ---------- after-event check ----------
+function calcFor(draft, o) { const keep = state.draft; state.draft = normalize({ ...state, draft: clone(draft) }).draft; try { return calc(o); } finally { state.draft = keep; } }
+function openActuals(evId) {
+  const ev = state.events[evId]; if (!ev || !ev.draft) { toast('This event has no saved quote to compare'); return; }
+  const dr = ev.draft, r = calcFor(dr), trip = ev.trip || (dr.trip && dr.trip.done ? dr.trip : null);
+  const a = clone(ev.actuals || {});
+  const subtotal = num(ev.price) / (1 + r.taxR);
+  const lines = r.list.filter(i => i.lib).map((i, k) => {
+    const tItem = trip && trip.items.find(x => x.ing === i.ing);
+    const bought = (tItem ? num(tItem.packs) : i.packs) * num(i.lib.pack);
+    return { k, ing: i.ing, lib: i.lib, basis: i.basis, per: num(i.per), planUse: i.need, bought, left: a.left?.[i.ing] ?? '' };
+  });
+  const v = {
+    guests: a.guests ?? r.guests, served: a.served ?? n0(dr.f.participation, 100),
+    spend: a.spend ?? (trip ? tripSpent(trip) : r.shoppingTrip), hours: a.hours ?? +r.ownerHrs.toFixed(2),
+    staff: a.staff ?? +r.staff.toFixed(2), travel: a.travel ?? +r.travel.toFixed(2), other: a.other ?? 0, notes: a.notes ?? '',
+  };
+  function n0(x, d) { const y = parseFloat(x); return isNaN(y) ? d : y; }
+  const body = openSheet({ title: `After-event check · ${ev.client || 'event'}`, body: `
+    <p class="hint">Fill this in after the event. It compares your quote with what really happened and suggests better amounts for next time.</p>
+    <div class="fields">
+      <label class="f">Actual guests<input data-a="guests" type="number" inputmode="numeric" min="0" value="${esc(v.guests)}"></label>
+      <label class="f">Guests served<span class="pct"><input data-a="served" type="number" inputmode="numeric" min="0" max="100" value="${esc(v.served)}"></span></label>
+    </div>
+    <div class="eyebrow" style="margin-top:18px">What's left over</div>
+    <p class="hint">Count what came home. Leave blank to skip an item.</p>
+    <div id="leftRows">${lines.map(l => `<div class="left-row" data-l="${l.k}"><div style="font-weight:600">${esc(l.lib.name)}</div>
+      <div class="lr">bought ${qty(l.bought)} ${esc(l.lib.unit)} · left over <input data-left="${l.k}" type="number" inputmode="decimal" min="0" value="${esc(l.left)}" aria-label="Left over"> ${esc(l.lib.unit)}</div>
+      <div class="sug" id="sug${l.k}"></div></div>`).join('')}</div>
+    <div class="eyebrow" style="margin-top:18px">Actual costs</div>
+    <div class="fields" style="margin-top:8px">
+      <label class="f">Spent on product<span class="money"><input data-a="spend" type="number" inputmode="decimal" min="0" value="${esc(+num(v.spend).toFixed(2))}"></span></label>
+      <label class="f">Your hours, all in<input data-a="hours" type="number" inputmode="decimal" min="0" step="0.25" value="${esc(v.hours)}"></label>
+      <label class="f">Attendant pay<span class="money"><input data-a="staff" type="number" inputmode="decimal" min="0" value="${esc(v.staff)}"></span></label>
+      <label class="f">Travel<span class="money"><input data-a="travel" type="number" inputmode="decimal" min="0" value="${esc(v.travel)}"></span></label>
+      <label class="f">Other costs<span class="money"><input data-a="other" type="number" inputmode="decimal" min="0" value="${esc(v.other)}"></span></label>
+    </div>
+    <label class="f" style="margin-top:12px">Notes<textarea data-a="notes" placeholder="e.g. rain, kids came back for seconds">${esc(v.notes)}</textarea></label>
+    <div class="eyebrow" style="margin-top:18px">Quote vs actual</div>
+    <div class="cmp" id="cmp" style="margin-top:8px"></div>
+    <div id="sugNote"></div>`,
+    buttons: [{ label: 'Cancel' }, { spacer: true }, { label: 'Update cart amounts', onClick: applySug }, { label: 'Save', cls: 'primary', onClick: saveA }] });
+
+  let result = null;
+  function compute() {
+    const g = num(v.guests), served = g * num(v.served) / 100;
+    const sugs = []; let usedCost = 0, counted = 0;
+    lines.forEach(l => {
+      const el = body.querySelector('#sug' + l.k);
+      if (String(l.left).trim() === '') { el.innerHTML = '<span class="m">not counted</span>'; usedCost += l.planUse * unitPrice(l.lib); return; }
+      counted++;
+      const used = Math.max(0, l.bought - num(l.left)); usedCost += used * unitPrice(l.lib);
+      const mult = l.lib.cat === 'product' ? (STYLE[dr.f.style] || 1) : 1;
+      const base = l.basis === 'guest' ? served * mult : l.basis === 'hour' ? num(dr.f.hours) * mult : 1;
+      const actualPer = base > 0 ? used / base : 0;
+      const diff = l.per > 0 ? (actualPer - l.per) / l.per : 0;
+      const color = Math.abs(diff) < 0.1 ? 'var(--good)' : 'var(--warn)';
+      el.innerHTML = `used ${qty(used)} ${esc(l.lib.unit)} (planned ${qty(l.planUse)}) · <span style="color:${color}">${+actualPer.toFixed(2)} per ${l.basis} vs ${l.per} planned</span>`;
+      if (l.basis !== 'event' && Math.abs(diff) >= 0.1) sugs.push({ ing: l.ing, name: l.lib.name, from: l.per, to: Math.round(actualPer * 100) / 100, basis: l.basis });
+    });
+    const productCost = r.byPacks ? num(v.spend) : usedCost;
+    const cost = productCost + r.decor + num(v.hours) * n('ownerRate') + num(v.staff) + num(v.travel) + r.overhead + r.addonCost + num(v.other) + r.sel.processing;
+    const profit = subtotal - cost, margin = subtotal > 0 ? profit / subtotal : 0;
+    const estCost = num(ev.cost);
+    body.querySelector('#cmp').innerHTML = `<span class="h"></span><span class="h n">Quote</span><span class="h n">Actual</span>
+      <span>Event cost</span><span class="n">${money(estCost)}</span><span class="n">${money(cost)}</span>
+      <span>Product spend</span><span class="n">${money(r.shoppingTrip)}</span><span class="n">${money(v.spend)}</span>
+      <span>Profit</span><span class="n">${money(ev.profit)}</span><span class="n" style="font-weight:700;color:${profit < 0 ? 'var(--bad)' : 'var(--good)'}">${money(profit)}</span>
+      <span>Margin</span><span class="n">${pct(ev.margin)}</span><span class="n">${pct(margin)}</span>`;
+    const tpl = state.templates[dr.templateId];
+    body.querySelector('#sugNote').innerHTML = sugs.length
+      ? `<div class="note warn">${sugs.length} amount${sugs.length > 1 ? 's were' : ' was'} off by 10% or more: ${sugs.map(x => `${esc(x.name)} ${x.from} → ${x.to}`).join(', ')}. ${tpl ? `Tap <b>Update cart amounts</b> to use these in ${esc(tpl.name)}.` : ''}</div>`
+      : counted ? '<div class="note good">Your per-guest amounts were within 10%. Nothing to change.</div>' : '';
+    result = { profit, margin, cost, sugs, subtotal };
+  }
+  body.addEventListener('input', e => {
+    const t = e.target;
+    if (t.dataset.a) v[t.dataset.a] = t.dataset.a === 'notes' ? t.value : t.value;
+    if (t.dataset.left !== undefined) lines[+t.dataset.left].left = t.value;
+    compute();
+  });
+  compute();
+  function saveA() {
+    ev.actuals = { ...v, left: Object.fromEntries(lines.filter(l => String(l.left).trim() !== '').map(l => [l.ing, num(l.left)])),
+      profit: result.profit, margin: result.margin, cost: result.cost, subtotal: result.subtotal, checked: today() };
+    markDirty('event', ev.id); closeSheet(); renderEvents(); toast('After-event check saved');
+  }
+  async function applySug() {
+    const tpl = state.templates[dr.templateId];
+    if (!tpl) { toast('This event used a custom list, so there is no cart to update'); return; }
+    if (!result.sugs.length) { toast('Nothing to update — enter leftovers first'); return; }
+    const sugs = result.sugs; saveA();
+    if (!(await ask(`Update ${tpl.name}? ${sugs.map(x => `${x.name}: ${x.from} → ${x.to} per ${x.basis}`).join(' · ')}`, 'Update cart'))) return;
+    sugs.forEach(x => tpl.items.filter(i => i.ing === x.ing && i.basis === x.basis).forEach(i => i.per = x.to));
+    markDirty('template', tpl.id); renderAll(); toast(`${tpl.name} updated`);
+  }
+}
 
 // ---------- library ----------
 function renderLibrary() {

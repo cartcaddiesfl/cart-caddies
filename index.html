@@ -167,6 +167,21 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
 .item .r2 select { width: auto; padding: 7px 9px; }
 .item .calc { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .item .calc b { color: var(--text); font-variant-numeric: tabular-nums; }
+.trip-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.trip-row.got .tn { text-decoration: line-through; text-decoration-color: var(--gilt); color: var(--muted); }
+.trip-row .tn { font-weight: 600; }
+.trip-row .tm { font-size: 12.5px; color: var(--muted); }
+.trip-row .tf { grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.trip-row .tf input { width: 74px; padding: 7px 9px; }
+.trip-row .tf .money input { width: 96px; padding-left: 22px; }
+.trip-sum { position: sticky; top: -8px; background: var(--surface); padding: 8px 0 10px; z-index: 1; border-bottom: 1px solid var(--line); }
+.cmp { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 14px; font-size: 14px; }
+.cmp .h { font-size: 10px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.cmp .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.left-row { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+.left-row .lr { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.left-row .lr input { width: 90px; padding: 7px 9px; }
+.left-row .sug { font-size: 12.5px; }
 .item .est { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--rose); border: 1px solid #5a403b; border-radius: 999px; padding: 1px 7px; }
 .total-row { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 2px 0; }
 .total-row .big { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -363,10 +378,10 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
           <div class="row" style="margin-top:10px"><button class="btn small" id="addDecor">+ Add</button></div>
         </div>
         <div class="card">
-          <h3>Copy the <em>list</em></h3>
-          <p class="hint">A checklist for Sam's or BJ's.</p>
+          <h3>Go <em>shopping</em></h3>
+          <p class="hint">Copy the list, or open Shopping trip to check items off and enter real prices as you go.</p>
           <textarea id="shopText" readonly style="min-height:150px;font-size:13px"></textarea>
-          <div class="next"><button class="btn small" id="copyShop">Copy list</button><button class="btn primary" data-go="costs">Labor &amp; travel →</button></div>
+          <div class="next"><button class="btn small" id="copyShop">Copy list</button><button class="btn small" id="startTrip">Shopping trip</button><button class="btn primary" data-go="costs">Labor &amp; travel →</button></div>
         </div>
       </div>
     </div>
@@ -513,7 +528,7 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
     <div class="tiles four" style="margin-bottom:14px">
       <div class="tile"><div class="k">Booked revenue</div><div class="v" id="evRevenue">$0</div></div>
       <div class="tile"><div class="k">Booked profit</div><div class="v" id="evProfit">$0</div></div>
-      <div class="tile"><div class="k">Avg margin</div><div class="v" id="evMargin">—</div></div>
+      <div class="tile"><div class="k" id="evMarginK">Avg margin</div><div class="v" id="evMargin">—</div></div>
       <div class="tile"><div class="k">Open quotes</div><div class="v" id="evOpen">0</div></div>
     </div>
     <div class="row" style="margin-bottom:10px"><span class="grow"></span><button class="btn small" id="copyCsv">Copy for spreadsheet</button></div>

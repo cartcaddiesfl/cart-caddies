@@ -9,7 +9,9 @@ a phone-first web app for pricing event carts. installs to your home screen, and
 - **card fees** — only when the client pays by card, charged on the full total including tax
 - **ingredients** — your price list. pick items from a dropdown on any cart; change a price once and every cart and quote updates
 - **carts** — saved ingredient lists (s'mores, Biscoff s'mores, cotton candy, popcorn, hot chocolate, candy, charcuterie, lemonade). duplicate one and tweak it for a new cart
+- **shopping trip** — check items off at the store and type the shelf price; finishing the trip updates your ingredient prices and records what you spent
 - **events** — saved quotes with status (quoted / booked / paid / lost) and booked totals
+- **after-event check** — enter leftovers and actual costs; compares quote vs actual profit and suggests better per-guest amounts for the cart
 - **settings** — margins, minimum booking, 7% Broward sales tax, card fees, overhead, default add-ons and decor
 
 starter ingredient prices are estimates of Sam's Club / BJ's / Amazon prices, marked **est.** until you update them.
