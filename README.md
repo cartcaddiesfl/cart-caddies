@@ -4,7 +4,9 @@ a phone-first web app for pricing event carts. installs to your home screen, and
 
 ## what's inside
 
-- **quote** — event → shopping list → labor & travel → pricing (minimum / target / premium) → budget check → client quote (share, copy or print)
+- **quote** — event → shopping list → labor & travel → pricing (minimum / target / premium, plus a client budget check) → client quote (share, copy or print)
+- **ingredient cost** — each event is charged for what it uses (plus the buffer); the shopping list still rounds up to whole packs and shows what's left over. switch to whole-pack charging in settings
+- **card fees** — only when the client pays by card, charged on the full total including tax
 - **ingredients** — your price list. pick items from a dropdown on any cart; change a price once and every cart and quote updates
 - **carts** — saved ingredient lists (s'mores, Biscoff s'mores, cotton candy, popcorn, hot chocolate, candy, charcuterie, lemonade). duplicate one and tweak it for a new cart
 - **events** — saved quotes with status (quoted / booked / paid / lost) and booked totals

@@ -309,8 +309,7 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
       <button data-step="shop"><b>ii</b>Shopping</button>
       <button data-step="costs"><b>iii</b>Labor &amp; travel</button>
       <button data-step="pricing"><b>iv</b>Pricing</button>
-      <button data-step="budget"><b>v</b>Budget</button>
-      <button data-step="quote"><b>vi</b>Client quote</button>
+      <button data-step="quote"><b>v</b>Client quote</button>
     </div>
 
     <!-- step: event -->
@@ -329,7 +328,7 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
             <label class="f">Service hours<input data-f="hours" type="number" inputmode="decimal" min="0" step="0.5"></label>
             <label class="f">Serving style<select data-f="style"><option value="light">Light</option><option value="standard">Standard</option><option value="generous">Generous</option></select></label>
             <label class="f">Service level<select data-f="level"><option value="dropoff">Drop-off &amp; setup</option><option value="attended">Attended</option><option value="full">Full service (+1 attendant)</option></select></label>
-            <label class="f">Client budget<span class="money"><input data-f="budget" type="number" inputmode="decimal" min="0" placeholder="optional"></span></label>
+            <label class="f">Client pays by<select data-f="payMethod"><option value="card">Card (fee applies)</option><option value="cash">Cash, Zelle or check</option></select></label>
             <label class="f" style="grid-column:1/-1">Venue / location<input data-f="venue" placeholder="optional"></label>
           </div>
           <details><summary>What do these mean?</summary>
@@ -337,7 +336,7 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
           </details>
         </div>
         <div class="card">
-          <div class="eyebrow">At a glance</div>
+          <div class="eyebrow">So far</div>
           <div class="lines" id="glance" style="margin-top:10px"></div>
           <div class="next" style="margin-top:16px"><button class="btn primary" data-go="shop">Shopping list →</button></div>
         </div>
@@ -349,11 +348,12 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
       <div class="card">
         <div class="row"><div class="grow"><div class="eyebrow" id="shopCart">Cart</div><h3>Shopping <em>list</em></h3></div>
           <label class="f" style="width:110px">Buffer<span class="pct"><input data-f="overage" type="number" inputmode="numeric" min="0"></span></label></div>
-        <p class="hint">Pick ingredients from your list. Amounts scale with guests and portions, then round up to whole packs.</p>
+        <p class="hint" id="shopHint">Pick ingredients from your list. Amounts scale with guests and portions.</p>
         <div class="items" id="draftItems"></div>
         <div class="row" style="margin-top:10px"><button class="btn small" id="addDraftItem">+ Add ingredient</button><span class="grow"></span>
           <button class="link" id="saveAsCart">Save as new cart</button><button class="link" id="updateCart">Update cart</button></div>
-        <div class="total-row"><span class="eyebrow">Shopping total</span><span><span class="big" id="shopTotal">$0</span> <span class="hint" id="shopPerGuest" style="margin:0"></span></span></div>
+        <div class="total-row"><span class="eyebrow" id="shopTotalK">Product cost this event</span><span><span class="big" id="shopTotal">$0</span> <span class="hint" id="shopPerGuest" style="margin:0"></span></span></div>
+        <div class="lines" id="shopTrip" style="margin-top:10px"></div>
       </div>
       <div class="grid two">
         <div class="card">
@@ -438,6 +438,14 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
         </div>
         <div id="pricingNote"></div>
       </div>
+      <div class="card">
+        <div class="row" style="align-items:flex-end"><div class="grow"><h3>Client <em>budget</em></h3><p class="hint" style="margin-bottom:0">Got a number from the client? Compare it with your options.</p></div>
+          <label class="f" style="width:170px">Budget (with tax)<span class="money"><input data-f="budget" type="number" inputmode="decimal" min="0" placeholder="optional"></span></label></div>
+        <div class="grid two" id="budgetWrap" style="margin-top:14px">
+          <div id="budgetOut"></div>
+          <div><div class="eyebrow" id="budgetIdeasK">Ways to fit</div><div id="budgetIdeas" style="margin-top:8px"></div></div>
+        </div>
+      </div>
       <div class="grid two">
         <div class="card">
           <h3>Event <em>cost</em></h3>
@@ -450,27 +458,11 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
           <div class="lines" id="clientLines" style="margin-top:12px"></div>
           <div class="eyebrow" style="margin-top:18px">Quick checks</div>
           <div class="lines" id="checks" style="margin-top:8px"></div>
-          <div class="next" style="margin-top:14px"><button class="btn" data-go="budget">Budget</button><button class="btn primary" data-go="quote">Client quote →</button></div>
+          <div class="next" style="margin-top:14px"><button class="btn primary" data-go="quote">Client quote →</button></div>
         </div>
       </div>
     </div>
 
-    <!-- step: budget -->
-    <div class="step" id="step-budget">
-      <div class="grid two">
-        <div class="card">
-          <h3>Budget <em>check</em></h3>
-          <p class="hint">Compare the client's number with your price options.</p>
-          <label class="f" style="max-width:220px">Client budget (with tax)<span class="money"><input data-f="budget" type="number" inputmode="decimal" min="0" placeholder="enter budget"></span></label>
-          <div id="budgetOut" style="margin-top:14px"></div>
-        </div>
-        <div class="card">
-          <h3>Ways to <em>fit</em></h3>
-          <p class="hint">Each idea changes one thing and re-prices at your target margin.</p>
-          <div id="budgetIdeas"></div>
-        </div>
-      </div>
-    </div>
 
     <!-- step: quote -->
     <div class="step" id="step-quote">
@@ -557,6 +549,7 @@ details { margin-top: 10px; } summary { cursor: pointer; font-size: 13px; color:
             <label class="f">Sales tax<span class="pct"><input data-s="tax" type="number" inputmode="decimal" min="0" step="0.01"></span></label>
             <label class="f">Card fee<span class="pct"><input data-s="procFee" type="number" inputmode="decimal" min="0" step="0.1"></span></label>
             <label class="f">Guests per attendant<input data-s="guestsPerAtt" type="number" inputmode="numeric" min="1"></label>
+            <label class="f">Charge ingredients by<select data-s="priceBy"><option value="used">What you use</option><option value="packs">Whole packs bought</option></select></label>
           </div>
           <p class="hint" style="margin:12px 0 0">Broward County sales tax is 7% (6% Florida + 1% county). Ask your accountant how it applies to your services.</p>
         </div>

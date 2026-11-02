@@ -99,14 +99,14 @@ const TEMPLATES = [
 const SETTINGS0 = {
   f: { bizName: 'Cart Caddies', bizContact: '', mMin: 20, mTarget: 35, mPremium: 50, minBooking: 350, roundTo: '25', tax: 7, procFee: 3,
     guestsPerAtt: 150, eventsPerMonth: 6, ownerRate: 25, attRate: 20, mileRate: 0.7, freeMiles: 0, rushPct: 15, holidayFee: 75,
-    depType: 'flat', depValue: 100, balanceDays: 7, validDays: 7, closing: "Let me know if you have any questions — I can't wait to celebrate with you!" },
+    depType: 'flat', depValue: 100, priceBy: 'used', balanceDays: 7, validDays: 7, closing: "Let me know if you have any questions — I can't wait to celebrate with you!" },
   overhead: [{ name: 'Insurance', amt: 85 }, { name: 'Cart / vehicle payment', amt: 150 }, { name: 'Storage', amt: 75 }, { name: 'Software & booking tools', amt: 40 }, { name: 'Marketing', amt: 100 }],
   decor: [{ name: 'Signage & decor', cost: 15 }, { name: 'Cart & equipment wear', cost: 25 }],
   addons: [{ name: 'Custom signage', cost: 15, price: 50 }, { name: 'Extra hour of service', cost: 40, price: 125 }, { name: 'Premium toppings bar', cost: 35, price: 95 }],
 };
 const DRAFT_F0 = { client: '', date: '', eventType: 'Wedding', venue: '', guests: 100, participation: 100, hours: 3, style: 'standard', level: 'attended', budget: '',
   overage: 10, prepHrs: 2, setupHrs: 1, breakdownHrs: 0.5, driveHrs: 1, attendants: '', attHours: '', miles: 30, tolls: 0, rushOn: false, holidayOn: false,
-  customPrice: '', showIncluded: true, extraIncluded: '' };
+  customPrice: '', showIncluded: true, extraIncluded: '', payMethod: 'card' };
 const STYLE = { light: 0.75, standard: 1, generous: 1.25 };
 const STYLE_LABEL = { light: 'Light portions', standard: 'Standard portions', generous: 'Generous portions' };
 
@@ -268,6 +268,7 @@ function showView(v) {
   window.scrollTo(0, 0);
 }
 function showStep(s) {
+  if (!$('step-' + s)) s = s === 'budget' ? 'pricing' : 'event';
   showView('quote');
   document.querySelectorAll('#steps button').forEach(b => b.classList.toggle('active', b.dataset.step === s));
   document.querySelectorAll('.step').forEach(el => el.classList.toggle('active', el.id === 'step-' + s));
@@ -392,6 +393,7 @@ function calc(o = {}) {
   const style = o.style ?? d.f.style;
   const served = guests * n('participation') / 100;
   const over = 1 + n('overage') / 100;
+  const byPacks = S().f.priceBy === 'packs';
 
   const list = d.items.map(it => {
     const ing = state.library[it.ing];
@@ -400,9 +402,11 @@ function calc(o = {}) {
     const base = it.basis === 'guest' ? served * num(it.per) * mult : it.basis === 'hour' ? hours * num(it.per) * mult : num(it.per);
     const need = base > 0 ? base * over : 0;
     const packs = ing.pack > 0 ? Math.ceil(need / ing.pack - 1e-9) : 0;
-    return { ...it, lib: ing, need, packs, cost: packs * num(ing.price) };
+    const usedCost = need * unitPrice(ing), packCost = packs * num(ing.price);
+    return { ...it, lib: ing, need, packs, usedCost, packCost, cost: byPacks ? packCost : usedCost };
   });
   const shopping = list.reduce((s, i) => s + i.cost, 0);
+  const shoppingTrip = list.reduce((s, i) => s + (i.packCost || 0), 0);
   const decor = d.decor.reduce((s, x) => s + num(x.cost), 0);
 
   const ownerHrs = n('prepHrs') + n('setupHrs') + (level === 'dropoff' ? 0 : hours) + n('breakdownHrs') + n('driveHrs');
@@ -419,21 +423,22 @@ function calc(o = {}) {
 
   const baseCost = shopping + decor + laborValue + staff + travel + overhead;
   const totalCost = baseCost + addonCost;
-  const fee = n('procFee') / 100, taxR = n('tax') / 100;
+  const card = d.f.payMethod !== 'cash';
+  const fee = card ? n('procFee') / 100 : 0, taxR = n('tax') / 100;
   const out = base => {
     const rush = d.f.rushOn ? base * n('rushPct') / 100 : 0;
     const holiday = d.f.holidayOn ? n('holidayFee') : 0;
     const subtotal = base + rush + holiday + addonPrice;
-    const processing = subtotal * fee;
+    const processing = subtotal * (1 + taxR) * fee; // processors charge on the full total, tax included
     const profit = subtotal - totalCost - processing;
     return { base, rush, holiday, subtotal, processing, profit, margin: subtotal > 0 ? profit / subtotal : 0, tax: subtotal * taxR, total: subtotal * (1 + taxR) };
   };
-  const tierBase = m => Math.max(n('minBooking'), roundUp(baseCost / Math.max(0.05, 1 - m - fee)));
+  const tierBase = m => Math.max(n('minBooking'), roundUp(baseCost / Math.max(0.05, 1 - m - fee * (1 + taxR))));
   const tiers = {};
   [['min', 'Minimum', 'mMin'], ['target', 'Target', 'mTarget'], ['premium', 'Premium', 'mPremium']].forEach(([k, name, mk]) => { const m = n(mk) / 100; tiers[k] = { key: k, name, m, mk, ...out(tierBase(m)) }; });
   const custom = blank('customPrice') ? null : { key: 'custom', name: 'Custom', ...out(n('customPrice')) };
   const sel = d.custom && custom ? custom : tiers[d.tier] || tiers.target;
-  return { guests, served, hours, level, style, list, shopping, decor, ownerHrs, laborValue, att, autoAtt, attHrs, staff, travel, overhead, addons, addonCost, addonPrice, baseCost, totalCost, fee, taxR, tiers, custom, sel };
+  return { guests, served, hours, level, style, list, shopping, shoppingTrip, byPacks, card, decor, ownerHrs, laborValue, att, autoAtt, attHrs, staff, travel, overhead, addons, addonCost, addonPrice, baseCost, totalCost, fee, taxR, tiers, custom, sel };
 }
 
 // ---------- render: quote ----------
@@ -457,8 +462,7 @@ function update() {
   $('cartPick').innerHTML = Object.values(state.templates).sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeCompare(b.name)).map(t => `<option value="${esc(t.id)}" ${t.id === d.templateId ? 'selected' : ''}>${esc(t.name)}</option>`).join('') + `<option value="" ${!tpl ? 'selected' : ''}>Custom (no template)</option>`;
   const ev = d.eventId && state.events[d.eventId];
   $('loadedNote').textContent = ev ? `Editing saved event: ${ev.client || 'unnamed'} · ${ev.status}` : 'Start here when an inquiry comes in.';
-  $('glance').innerHTML = [['Cart', tpl ? tpl.name : 'Custom'], ['Guests served', qty(r.served)], ['Service', `${r.hours} hrs · ${STYLE_LABEL[r.style].toLowerCase()}`], ['Your hours, all in', r.ownerHrs.toFixed(1)],
-    ['Extra attendants', r.att], ['Shopping', money(r.shopping, 2)], ['Total event cost', money(r.totalCost)], ['Target quote', money(r.tiers.target.total)]]
+  $('glance').innerHTML = [['Cart', tpl ? tpl.name : 'Custom'], ['Guests served', `${qty(r.served)} of ${g}`], ['Your hours, all in', r.ownerHrs.toFixed(1)]]
     .map(([k, v]) => `<span class="m">${k}</span><span class="n">${esc(v)}</span>`).join('');
 
   // shopping
@@ -466,14 +470,19 @@ function update() {
   $('updateCart').hidden = !tpl;
   r.list.forEach((it, i) => {
     const el = document.querySelector(`#draftItems [data-calc="${i}"]`); if (!el) return;
-    el.innerHTML = it.lib ? `<span>need ${qty(it.need)} ${esc(it.lib.unit)} → buy ${it.packs} × ${qty(it.lib.pack)} @ ${money(it.lib.price, 2)}</span><b>${money(it.cost, 2)}</b>` : '<span>Choose an ingredient</span>';
+    el.innerHTML = it.lib ? `<span>use ${qty(it.need)} ${esc(it.lib.unit)} · buy ${it.packs} × ${qty(it.lib.pack)} (${money(it.packCost, 2)})</span><b>${money(it.cost, 2)}</b>` : '<span>Choose an ingredient</span>';
   });
   $('shopTotal').textContent = money(r.shopping, 2);
+  $('shopTotalK').textContent = r.byPacks ? 'Product cost (whole packs)' : 'Product cost this event';
+  $('shopHint').textContent = r.byPacks ? 'Each event pays for every pack you buy. Change this in Settings.' : 'Each event pays for what it uses (plus the buffer). Leftovers carry to your next event.';
+  const left = r.shoppingTrip - r.list.reduce((s, i) => s + (i.usedCost || 0), 0);
+  $('shopTrip').innerHTML = `<span class="m">Shopping trip (whole packs)</span><span class="n">${money(r.shoppingTrip, 2)}</span>` +
+    (left > 0.005 ? `<span class="m">Left over for next time</span><span class="n">${money(left, 2)}</span>` : '');
   $('shopPerGuest').textContent = g > 0 ? `${money(r.shopping / g, 2)} / guest` : '';
   const byStore = {};
   r.list.filter(i => i.packs > 0).forEach(i => (byStore[i.lib.store || 'Other'] ||= []).push(i));
   $('shopText').value = `${tpl ? tpl.name : 'Cart'} · ${g} guests · ${d.f.date || 'date TBD'}\n` + Object.keys(byStore).sort().map(st =>
-    `\n${st.toUpperCase()}\n` + byStore[st].map(i => `[ ] ${i.lib.name} — ${i.packs} × ${qty(i.lib.pack)} ${i.lib.unit}`).join('\n')).join('\n') + `\n\nEstimated total: ${money(r.shopping, 2)}`;
+    `\n${st.toUpperCase()}\n` + byStore[st].map(i => `[ ] ${i.lib.name} — ${i.packs} × ${qty(i.lib.pack)} ${i.lib.unit}`).join('\n')).join('\n') + `\n\nEstimated total: ${money(r.shoppingTrip, 2)}`;
 
   // costs
   $('serviceView').value = r.level === 'dropoff' ? '0 (drop-off)' : r.hours;
@@ -504,13 +513,13 @@ function update() {
       : s.margin < r.tiers.min.m ? `<div class="note warn">Below your ${pct(r.tiers.min.m)} minimum margin. Your minimum quote is ${money(r.tiers.min.total)}.</div>`
       : `<div class="note good">Your price covers every cost with a ${pct(s.margin)} margin.</div>`;
   } else if (r.tiers.min.base === n('minBooking')) note = `<div class="note info">Your ${money(n('minBooking'))} minimum booking applies to at least one option.</div>`;
-  if (r.taxR > 0) note += `<div class="note info">Prices include ${+(r.taxR * 100).toFixed(2)}% sales tax.</div>`;
+  note += `<div class="note info">Prices include ${r.taxR > 0 ? +(r.taxR * 100).toFixed(2) + '% sales tax' : 'no sales tax'} and ${r.card ? `a ${n('procFee')}% card fee on the full total` : 'no card fee (cash, Zelle or check)'}.</div>`;
   $('pricingNote').innerHTML = note;
 
-  const parts = COSTS.map(([k, l, c]) => ({ l, c, v: r[k] })).concat([{ l: 'Card fees', c: '#4a433d', v: s.processing }]).filter(p => p.v > 0.005);
+  const parts = COSTS.map(([k, l, c]) => ({ l, c, v: r[k] })).concat([{ l: 'Card fee', c: '#4a433d', v: s.processing }]).filter(p => p.v > 0.005);
   const den = Math.max(1, s.subtotal, r.totalCost + s.processing);
   $('bar').innerHTML = parts.map(p => `<div style="width:${p.v / den * 100}%;background:${p.c}"></div>`).join('') + (s.profit > 0 ? `<div style="width:${s.profit / den * 100}%;background:var(--good)"></div>` : '');
-  $('costLines').innerHTML = parts.map(p => `<span><span class="sw" style="background:${p.c}"></span>${p.l}${p.l === 'Your labor value' ? ` <span class="m">(${r.ownerHrs.toFixed(1)} hrs)</span>` : ''}</span><span class="n">${money(p.v, 2)}</span>`).join('') +
+  $('costLines').innerHTML = parts.map(p => `<span><span class="sw" style="background:${p.c}"></span>${p.l}${p.l === 'Your labor value' ? ` <span class="m">(${r.ownerHrs.toFixed(1)} hrs)</span>` : p.l === 'Product & supplies' ? ` <span class="m">(${r.byPacks ? 'whole packs' : 'used'})</span>` : ''}</span><span class="n">${money(p.v, 2)}</span>`).join('') +
     `<span class="t">Total event cost</span><span class="n t">${money(r.totalCost + s.processing, 2)}</span>` +
     `<span><span class="sw" style="background:var(--good)"></span>Projected profit</span><span class="n" style="font-weight:700;color:${s.profit < 0 ? 'var(--bad)' : 'var(--good)'}">${money(s.profit, 2)}</span>`;
   $('clientLines').innerHTML = [['Event price', s.base], s.rush ? ['Rush booking fee', s.rush] : null, s.holiday ? ['Holiday date fee', s.holiday] : null,
@@ -531,9 +540,10 @@ function update() {
 
 function renderBudget(r) {
   const B = num(D().f.budget);
-  if (!(B > 0)) { $('budgetOut').innerHTML = '<div class="note info">Enter the client\'s budget to compare.</div>'; $('budgetIdeas').innerHTML = '<p class="hint">Ideas appear once you enter a budget.</p>'; return; }
+  $('budgetWrap').hidden = !(B > 0);
+  if (!(B > 0)) return;
   const rows = Object.values(r.tiers).map(t => { const gap = B - t.total; return `<span>${t.name} <span class="m">${money(t.total)}</span></span><span class="n" style="color:${gap >= 0 ? 'var(--good)' : 'var(--bad)'}">${gap >= 0 ? 'fits · ' + money(gap) + ' under' : money(-gap) + ' over'}</span>`; }).join('');
-  const sub = B / (1 + r.taxR), profitAt = sub * (1 - r.fee) - r.totalCost, marginAt = sub > 0 ? profitAt / sub : 0;
+  const sub = B / (1 + r.taxR), profitAt = sub - B * r.fee - r.totalCost, marginAt = sub > 0 ? profitAt / sub : 0;
   const v = profitAt < 0 ? ['bad', `At ${money(B)} you would lose ${money(-profitAt)}. Change the scope or pass on it.`]
     : marginAt < r.tiers.min.m ? ['warn', `At ${money(B)} you'd make ${money(profitAt)} (${pct(marginAt)}), below your ${pct(r.tiers.min.m)} minimum.`]
     : marginAt < r.tiers.target.m ? ['info', `At ${money(B)} you'd make ${money(profitAt)} (${pct(marginAt)}). Above your minimum, under your target.`]
