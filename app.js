@@ -401,9 +401,12 @@ function calc(o = {}) {
     const mult = ing.cat === 'product' ? STYLE[style] || 1 : 1;
     const base = it.basis === 'guest' ? served * num(it.per) * mult : it.basis === 'hour' ? hours * num(it.per) * mult : num(it.per);
     const need = base > 0 ? base * over : 0;
-    const packs = ing.pack > 0 ? Math.ceil(need / ing.pack - 1e-9) : 0;
+    const onHand = Math.max(0, num(ing.onHand));
+    const toBuy = Math.max(0, need - onHand);
+    const packs = ing.pack > 0 ? Math.ceil(toBuy / ing.pack - 1e-9) : 0;          // what to buy after stock
+    const packsAll = ing.pack > 0 ? Math.ceil(need / ing.pack - 1e-9) : 0;        // whole packs if you had none
     const usedCost = need * unitPrice(ing), packCost = packs * num(ing.price);
-    return { ...it, lib: ing, need, packs, usedCost, packCost, cost: byPacks ? packCost : usedCost };
+    return { ...it, lib: ing, need, onHand, packs, usedCost, packCost, cost: byPacks ? packsAll * num(ing.price) : usedCost };
   });
   const shopping = list.reduce((s, i) => s + i.cost, 0);
   const shoppingTrip = list.reduce((s, i) => s + (i.packCost || 0), 0);
@@ -470,12 +473,12 @@ function update() {
   $('updateCart').hidden = !tpl;
   r.list.forEach((it, i) => {
     const el = document.querySelector(`#draftItems [data-calc="${i}"]`); if (!el) return;
-    el.innerHTML = it.lib ? `<span>use ${qty(it.need)} ${esc(it.lib.unit)} · buy ${it.packs} × ${qty(it.lib.pack)} (${money(it.packCost, 2)})</span><b>${money(it.cost, 2)}</b>` : '<span>Choose an ingredient</span>';
+    el.innerHTML = it.lib ? `<span>use ${qty(it.need)} ${esc(it.lib.unit)}${it.onHand > 0 ? ` · have ${qty(it.onHand)}` : ''} · ${it.packs ? `buy ${it.packs} × ${qty(it.lib.pack)} (${money(it.packCost, 2)})` : '<span style="color:var(--good)">in stock</span>'}</span><b>${money(it.cost, 2)}</b>` : '<span>Choose an ingredient</span>';
   });
   $('shopTotal').textContent = money(r.shopping, 2);
   $('shopTotalK').textContent = r.byPacks ? 'Product cost (whole packs)' : 'Product cost this event';
   $('shopHint').textContent = r.byPacks ? 'Each event pays for every pack you buy. Change this in Settings.' : 'Each event pays for what it uses (plus the buffer). Leftovers carry to your next event.';
-  const left = r.shoppingTrip - r.list.reduce((s, i) => s + (i.usedCost || 0), 0);
+  const left = r.list.reduce((s, i) => s + (i.lib ? Math.max(0, i.onHand + i.packs * num(i.lib.pack) - i.need) * unitPrice(i.lib) : 0), 0);   // stock + purchases - use
   const tr = d.trip;
   $('shopTrip').innerHTML = `<span class="m">Shopping trip (whole packs)</span><span class="n">${money(r.shoppingTrip, 2)}</span>` +
     (left > 0.005 ? `<span class="m">Left over for next time</span><span class="n">${money(left, 2)}</span>` : '') +
@@ -485,7 +488,8 @@ function update() {
   const byStore = {};
   r.list.filter(i => i.packs > 0).forEach(i => (byStore[i.lib.store || 'Other'] ||= []).push(i));
   $('shopText').value = `${tpl ? tpl.name : 'Cart'} · ${g} guests · ${d.f.date || 'date TBD'}\n` + Object.keys(byStore).sort().map(st =>
-    `\n${st.toUpperCase()}\n` + byStore[st].map(i => `[ ] ${i.lib.name} — ${i.packs} × ${qty(i.lib.pack)} ${i.lib.unit}`).join('\n')).join('\n') + `\n\nEstimated total: ${money(r.shoppingTrip, 2)}`;
+    `\n${st.toUpperCase()}\n` + byStore[st].map(i => `[ ] ${i.lib.name} — ${i.packs} × ${qty(i.lib.pack)} ${i.lib.unit}`).join('\n')).join('\n') + `\n\nEstimated total: ${money(r.shoppingTrip, 2)}` +
+    (r.list.some(i => i.lib && i.packs === 0 && i.need > 0) ? `\n\nAlready in stock: ${r.list.filter(i => i.lib && i.packs === 0 && i.need > 0).map(i => i.lib.name).join(', ')}` : '');
 
   // costs
   $('serviceView').value = r.level === 'dropoff' ? '0 (drop-off)' : r.hours;
@@ -709,7 +713,7 @@ $('copyCsv').onclick = () => {
 const tripSpent = tr => (tr?.items || []).filter(i => i.got).reduce((s, i) => s + num(i.packs) * num(i.price), 0);
 function openTrip() {
   const d = D(), r = calc();
-  const planned = r.list.filter(i => i.lib && i.packs > 0).map(i => ({ ing: i.ing, packs: i.packs, price: num(i.lib.price), got: false }));
+  const planned = r.list.filter(i => i.lib && i.packs > 0).map(i => ({ ing: i.ing, packs: i.packs, price: num(i.lib.price), got: false, had: i.onHand }));
   if (!d.trip || d.trip.done) d.trip = { date: today(), items: planned, done: false };
   else planned.forEach(p => { if (!d.trip.items.some(x => x.ing === p.ing)) d.trip.items.push(p); });
   markDirty('draft');
@@ -743,7 +747,9 @@ function openTrip() {
     tr.items.filter(i => i.got).forEach(i => {
       const lib = state.library[i.ing]; if (!lib) return;
       if (Math.abs(num(lib.price) - num(i.price)) > 0.004) { lib.price = num(i.price); changed++; }
-      lib.est = false; lib.checked = today(); markDirty('ingredient', lib.id);
+      lib.est = false; lib.checked = today();
+      lib.onHand = Math.round((num(lib.onHand) + num(i.packs) * num(lib.pack)) * 100) / 100;   // purchases go into stock
+      markDirty('ingredient', lib.id);
     });
     tr.done = true; tr.spent = tripSpent(tr); tr.date = today();
     if (d.eventId && state.events[d.eventId]) { state.events[d.eventId].trip = clone(tr); markDirty('event', d.eventId); }
@@ -762,7 +768,7 @@ function openActuals(evId) {
   const subtotal = num(ev.price) / (1 + r.taxR);
   const lines = r.list.filter(i => i.lib).map((i, k) => {
     const tItem = trip && trip.items.find(x => x.ing === i.ing);
-    const bought = (tItem ? num(tItem.packs) : i.packs) * num(i.lib.pack);
+    const bought = tItem ? num(tItem.had) + num(tItem.packs) * num(i.lib.pack) : i.onHand + i.packs * num(i.lib.pack);   // what you started the event with
     return { k, ing: i.ing, lib: i.lib, basis: i.basis, per: num(i.per), planUse: i.need, bought, left: a.left?.[i.ing] ?? '' };
   });
   const v = {
@@ -778,9 +784,9 @@ function openActuals(evId) {
       <label class="f">Guests served<span class="pct"><input data-a="served" type="number" inputmode="numeric" min="0" max="100" value="${esc(v.served)}"></span></label>
     </div>
     <div class="eyebrow" style="margin-top:18px">What's left over</div>
-    <p class="hint">Count what came home. Leave blank to skip an item.</p>
+    <p class="hint">Count what came home. Leave blank to skip an item. Counted items become your new stock on hand.</p>
     <div id="leftRows">${lines.map(l => `<div class="left-row" data-l="${l.k}"><div style="font-weight:600">${esc(l.lib.name)}</div>
-      <div class="lr">bought ${qty(l.bought)} ${esc(l.lib.unit)} · left over <input data-left="${l.k}" type="number" inputmode="decimal" min="0" value="${esc(l.left)}" aria-label="Left over"> ${esc(l.lib.unit)}</div>
+      <div class="lr">started with ${qty(l.bought)} ${esc(l.lib.unit)} · left over <input data-left="${l.k}" type="number" inputmode="decimal" min="0" value="${esc(l.left)}" aria-label="Left over"> ${esc(l.lib.unit)}</div>
       <div class="sug" id="sug${l.k}"></div></div>`).join('')}</div>
     <div class="eyebrow" style="margin-top:18px">Actual costs</div>
     <div class="fields" style="margin-top:8px">
@@ -838,7 +844,8 @@ function openActuals(evId) {
   function saveA() {
     ev.actuals = { ...v, left: Object.fromEntries(lines.filter(l => String(l.left).trim() !== '').map(l => [l.ing, num(l.left)])),
       profit: result.profit, margin: result.margin, cost: result.cost, subtotal: result.subtotal, checked: today() };
-    markDirty('event', ev.id); closeSheet(); renderEvents(); toast('After-event check saved');
+    lines.filter(l => String(l.left).trim() !== '').forEach(l => { const lib = state.library[l.ing]; if (lib) { lib.onHand = num(l.left); markDirty('ingredient', lib.id); } });   // leftovers = new stock
+    markDirty('event', ev.id); renderLibrary(); update(); closeSheet(); renderEvents(); toast('After-event check saved');
   }
   async function applySug() {
     const tpl = state.templates[dr.templateId];
@@ -858,7 +865,7 @@ function renderLibrary() {
   const byG = {}; items.forEach(i => (byG[i.group || 'Other'] ||= []).push(i));
   $('libList').innerHTML = Object.keys(byG).sort().map(g => `<div class="group-h">${esc(g)}</div><div class="list">` + byG[g].sort((a, b) => a.name.localeCompare(b.name)).map(i => `
     <button class="li" data-ing="${esc(i.id)}"><div class="main"><div class="t1">${esc(i.name)}</div>
-      <div class="t2">${qty(i.pack)} ${esc(i.unit)} · ${esc(i.store || '—')}${i.checked ? ' · checked ' + esc(i.checked) : ''}</div></div>
+      <div class="t2">${qty(i.pack)} ${esc(i.unit)} · ${esc(i.store || '—')}${i.checked ? ' · checked ' + esc(i.checked) : ''}</div>${num(i.onHand) > 0 ? `<div class="t2" style="color:var(--good)">${qty(i.onHand)} ${esc(i.unit)} on hand</div>` : ''}</div>
       ${i.est ? '<span class="chip est">est.</span>' : ''}<div class="rt">${money(i.price, 2)}<small>${money(unitPrice(i), 3)} / ${esc(i.unit)}</small></div></button>`).join('') + '</div>').join('')
     || '<div class="empty">No ingredients match.</div>';
 }
@@ -878,6 +885,7 @@ function editIngredient(id) {
         <label class="f">Unit<input id="ingUnit" list="unitList" value="${esc(i.unit)}"></label>
         <label class="f">Units per pack<input id="ingPack" type="number" inputmode="decimal" min="0" value="${esc(i.pack)}"></label>
         <label class="f">Pack price<span class="money"><input id="ingPrice" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(i.price)}"></span></label>
+        <label class="f">On hand<input id="ingOnHand" type="number" inputmode="decimal" min="0" value="${esc(i.onHand ?? 0)}"></label>
         <label class="f">Store<select id="ingStore">${STORES.map(s => `<option ${s === i.store ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
       </div>
       <datalist id="groupList">${groups().map(g => `<option value="${esc(g)}">`).join('')}</datalist>
@@ -898,7 +906,7 @@ function editIngredient(id) {
           const price = num($('ingPrice').value), pack = num($('ingPack').value);
           const changed = !id || price !== num(i.price) || pack !== num(i.pack);
           state.library[nid] = { ...i, id: nid, name, group: $('ingGroup').value.trim() || 'Other', cat: $('ingCat').value, unit: $('ingUnit').value.trim() || 'pcs', pack, price, store: $('ingStore').value,
-            est: changed ? false : i.est, checked: changed ? today() : i.checked };
+            est: changed ? false : i.est, checked: changed ? today() : i.checked, onHand: Math.max(0, num($('ingOnHand').value)) };
           markDirty('ingredient', nid); closeSheet.after = null; closeSheet(); renderAll(); toast(id ? 'Price updated everywhere' : 'Ingredient added'); res(nid);
         } }] });
     const per = () => { const p = num($('ingPrice').value), k = num($('ingPack').value); $('ingPer').textContent = k > 0 ? `= ${money(p / k, 3)} per ${$('ingUnit').value || 'unit'}` : ''; };
