@@ -118,11 +118,13 @@ function turnOffAutoSend_() {
 
 /** hourly trigger entry point: respects business hours. */
 function runOutreach() {
+  dedupeNewLeads_();
   moveApprovedLeads_();
   process_(false);
 }
 
 function moveApprovedNow() {
+  dedupeNewLeads_();
   SpreadsheetApp.getUi().alert(moveApprovedLeads_() + ' lead(s) moved to the leads tab.');
 }
 
@@ -172,6 +174,46 @@ function moveApprovedLeads_() {
       mark('moved');
     }
     return moved;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * the scraper finds the same businesses on every run. this removes unreviewed rows in
+ * "new leads" that repeat an earlier row (same company + city) or are already in "leads".
+ * rows you marked (yes / skip / moved) are never deleted, so a "skip" keeps blocking re-adds.
+ */
+function dedupeNewLeads_() {
+  const ss = SpreadsheetApp.getActive();
+  const inbox = ss.getSheetByName('new leads');
+  const leads = ss.getSheetByName('leads');
+  if (!inbox || !leads || inbox.getLastRow() < 3) return 0;
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return 0;
+  try {
+    const keyOf = (row, col) => {
+      const company = String(row[col['company']] || '').trim().toLowerCase();
+      return company ? company + '|' + String(row[col['city']] || '').trim().toLowerCase() : '';
+    };
+    const leadValues = leads.getDataRange().getValues();
+    const col = headerMap_(leadValues[0]);
+    const seen = {};
+    leadValues.slice(1).forEach(row => { const k = keyOf(row, col); if (k) seen[k] = true; });
+
+    const inValues = inbox.getDataRange().getValues();
+    const inCol = headerMap_(inValues[0]);
+    const repeats = [];
+    for (let r = 1; r < inValues.length; r++) {
+      const k = keyOf(inValues[r], inCol);
+      if (!k) continue;
+      const reviewed = String(inValues[r][inCol['approve']]).trim() !== '';
+      if (seen[k] && !reviewed) repeats.push(r + 1);
+      seen[k] = true;
+    }
+    repeats.reverse().forEach(rowNumber => inbox.deleteRow(rowNumber));
+    return repeats.length;
   } finally {
     lock.releaseLock();
   }
