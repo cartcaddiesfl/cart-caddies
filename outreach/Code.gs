@@ -22,7 +22,10 @@ const CONFIG = {
 };
 
 const LEAD_HEADERS = ['ready', 'email', 'name', 'company', 'city', 'segment', 'detail',
-  'status', 'step', 'last sent', 'next send', 'thread id', 'notes'];
+  'status', 'step', 'last sent', 'next send', 'thread id', 'notes', 'instagram', 'website'];
+// "new leads" is where Make drops scraped leads for review. column names must match in Make.
+const INBOX_HEADERS = ['approve', 'name', 'email', 'company', 'city', 'segment', 'instagram', 'website', 'source'];
+const INBOX_FIELDS = ['name', 'email', 'company', 'city', 'segment', 'instagram', 'website'];
 const TEMPLATE_HEADERS = ['segment', 'step', 'label', 'wait days', 'subject', 'body'];
 const LOG_HEADERS = ['time', 'email', 'segment', 'step', 'label'];
 const SEGMENTS = ['planner', 'corporate', 'residential'];
@@ -35,6 +38,7 @@ function onOpen() {
     .addItem('1. set up sheet', 'setupSheet')
     .addItem('2. turn on auto-send (hourly)', 'turnOnAutoSend')
     .addSeparator()
+    .addItem('move approved leads now', 'moveApprovedNow')
     .addItem('send due emails now', 'sendNow')
     .addItem('turn off auto-send', 'turnOffAutoSend')
     .addToUi();
@@ -57,6 +61,14 @@ function setupSheet() {
   leads.getRange('H1').setNote('filled by the script. type "paused" to stop a lead. clear it to retry after an error.');
   leads.getRange('H1:L1').setBackground('#eeeeee');
 
+  // no checkboxes here on purpose: empty rows must stay empty so Make adds leads at the top
+  const inbox = getOrCreateTab_(ss, 'new leads', INBOX_HEADERS);
+  inbox.getRange('A2:A').setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(['yes', 'skip'], true).setAllowInvalid(true).build());
+  inbox.getRange('F2:F').setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(SEGMENTS, true).setAllowInvalid(true).build());
+  inbox.getRange('A1').setNote('pick "yes" to send this lead to the leads tab. the script then marks it "moved".');
+
   const templates = getOrCreateTab_(ss, 'templates', TEMPLATE_HEADERS);
   if (templates.getLastRow() < 2) {
     templates.getRange(2, 1, DEFAULT_TEMPLATES.length, TEMPLATE_HEADERS.length).setValues(DEFAULT_TEMPLATES);
@@ -75,6 +87,11 @@ function getOrCreateTab_(ss, name, headers) {
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
     sheet.setFrozenRows(1);
+  } else {
+    // add any columns introduced by a newer version of this script
+    const have = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim().toLowerCase());
+    headers.filter(h => have.indexOf(h) === -1).forEach(h =>
+      sheet.getRange(1, sheet.getLastColumn() + 1).setValue(h).setFontWeight('bold'));
   }
   return sheet;
 }
@@ -101,7 +118,69 @@ function turnOffAutoSend_() {
 
 /** hourly trigger entry point: respects business hours. */
 function runOutreach() {
+  moveApprovedLeads_();
   process_(false);
+}
+
+function moveApprovedNow() {
+  SpreadsheetApp.getUi().alert(moveApprovedLeads_() + ' lead(s) moved to the leads tab.');
+}
+
+/**
+ * copies rows marked "yes" in "new leads" into "leads" (ready left unticked),
+ * then marks them "moved". rows with no email or an email already in leads are flagged instead.
+ */
+function moveApprovedLeads_() {
+  const ss = SpreadsheetApp.getActive();
+  const inbox = ss.getSheetByName('new leads');
+  const leads = ss.getSheetByName('leads');
+  if (!inbox || !leads || inbox.getLastRow() < 2) return 0;
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return 0;
+  try {
+    const inValues = inbox.getDataRange().getValues();
+    const inCol = headerMap_(inValues[0]);
+    const leadValues = leads.getDataRange().getValues();
+    const col = headerMap_(leadValues[0]);
+
+    const known = {};
+    let free = 1; // 0-based index of the first row after the last lead
+    for (let i = 1; i < leadValues.length; i++) {
+      const e = String(leadValues[i][col['email']]).trim().toLowerCase();
+      if (e) { known[e] = true; free = i + 1; }
+    }
+
+    let moved = 0;
+    for (let r = 1; r < inValues.length; r++) {
+      if (String(inValues[r][inCol['approve']]).trim().toLowerCase() !== 'yes') continue;
+      const mark = value => inbox.getRange(r + 1, inCol['approve'] + 1).setValue(value);
+      const email = String(inValues[r][inCol['email']]).trim();
+      if (!email) { mark('no email'); continue; }
+      if (known[email.toLowerCase()]) { mark('duplicate'); continue; }
+
+      INBOX_FIELDS.forEach(field => {
+        if (inCol[field] === undefined || col[field] === undefined) return;
+        let value = String(inValues[r][inCol[field]]).trim();
+        if (field === 'segment') value = value.toLowerCase();
+        leads.getRange(free + 1, col[field] + 1).setValue(value);
+      });
+      leads.getRange(free + 1, col['ready'] + 1).insertCheckboxes();
+      known[email.toLowerCase()] = true;
+      free++;
+      moved++;
+      mark('moved');
+    }
+    return moved;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function headerMap_(headerRow) {
+  const map = {};
+  headerRow.forEach((h, i) => { map[String(h).trim().toLowerCase()] = i; });
+  return map;
 }
 
 /** menu entry point: ignores business hours, still respects the daily cap. */
