@@ -75,11 +75,24 @@ function setupSheet() {
     templates.getRange('F2:F').setWrap(true);
     templates.setColumnWidth(5, 280);
     templates.setColumnWidth(6, 560);
+  } else {
+    refreshUntouchedTemplates_(templates);
   }
 
   getOrCreateTab_(ss, 'log', LOG_HEADERS);
   ss.setActiveSheet(leads);
   SpreadsheetApp.getUi().alert('sheet is set up. next: menu → "2. turn on auto-send".');
+}
+
+/** replaces template bodies that still hold an older starter version; edited cells are left alone. */
+function refreshUntouchedTemplates_(sheet) {
+  const norm = text => String(text).replace(/\s+/g, ' ').trim();
+  const old = SUPERSEDED_BODIES.map(norm);
+  sheet.getDataRange().getValues().forEach((row, i) => {
+    if (i === 0 || old.indexOf(norm(row[5])) === -1) return;
+    const current = DEFAULT_TEMPLATES.filter(t => t[0] === String(row[0]).trim().toLowerCase() && t[1] === Number(row[1]))[0];
+    if (current) sheet.getRange(i + 1, 6).setValue(current[5]);
+  });
 }
 
 function getOrCreateTab_(ss, name, headers) {
@@ -425,7 +438,7 @@ function bumpSentToday_() {
 
 const DEFAULT_TEMPLATES = [
   ['planner', 1, 'intro', 0, 'quick intro — Cart Caddies, {{city}} events',
-    'hi {{name}},\n\ni came across {{company}} and loved {{detail}}. i\'m with Cart Caddies, a luxury party cart serving {{city}} — we\'re building out our vendor network with planners doing the kind of work you do.\n\nwould love to send over our concept and photos, or grab 15 minutes if it\'s useful heading into your next season. no pressure either way.'],
+    'hi {{name}},\n\ni came across {{company}} and loved {{detail}}. most clients end up choosing between planners who all offer the same vendor list — i\'m with Cart Caddies, a luxury party cart, and i\'d love to show you what a "wow" moment on wheels could do for your next proposal, if that\'s useful.\n\nhappy to send over photos and the concept, or grab 15 minutes heading into your next season. no pressure either way.'],
   ['planner', 2, 'follow-up 1', 2, '',
     'hi {{name}},\n\nbumping this up in case it got buried. happy to send our concept and photos so you have them on hand — just say the word.'],
   ['planner', 3, 'follow-up 2', 3, '',
@@ -434,7 +447,7 @@ const DEFAULT_TEMPLATES = [
     'hi {{name}},\n\nlast note from me — i won\'t keep filling your inbox. if a party cart ever fits one of your events, we\'d love to be on your vendor list. keep us in mind for next season.'],
 
   ['corporate', 1, 'intro', 0, 'a party cart for {{company}}\'s next team event',
-    'hi {{name}},\n\nsaw {{detail}} and figured this might be a fun fit for your next one. Cart Caddies is a luxury party cart that comes right to your office — an easy way to do something memorable without the usual event-planning lift.\n\nwant me to send over a quick overview for your next team celebration or holiday event?'],
+    'hi {{name}},\n\nmost team events are forgotten by the next Monday. saw {{detail}} and figured this one wouldn\'t be — Cart Caddies is a luxury party cart that comes right to your office, and it adds zero planning to your plate.\n\nwant me to send over a quick overview for your next team celebration or holiday event?'],
   ['corporate', 2, 'follow-up 1', 2, '',
     'hi {{name}},\n\nbumping this up in case it got buried. happy to send a short overview of how the party cart works for a team event at {{company}} — want it?'],
   ['corporate', 3, 'follow-up 2', 3, '',
@@ -450,4 +463,10 @@ const DEFAULT_TEMPLATES = [
     'hi {{name}},\n\none more thought: the cart comes to the building, so there\'s nothing for your team to set up. it fits a resident mixer, a pool day or a holiday gathering.\n\nopen to seeing the details?'],
   ['residential', 4, 'close', 4, '',
     'hi {{name}},\n\nlast note from me — i won\'t keep filling your inbox. if a party cart sounds right for a future resident event at {{company}}, just reply here and we\'ll take it from there.'],
+];
+
+// earlier starter copy. setup swaps these for the current version, but only in cells you haven't edited.
+const SUPERSEDED_BODIES = [
+    'hi {{name}},\n\ni came across {{company}} and loved {{detail}}. i\'m with Cart Caddies, a luxury party cart serving {{city}} — we\'re building out our vendor network with planners doing the kind of work you do.\n\nwould love to send over our concept and photos, or grab 15 minutes if it\'s useful heading into your next season. no pressure either way.',
+    'hi {{name}},\n\nsaw {{detail}} and figured this might be a fun fit for your next one. Cart Caddies is a luxury party cart that comes right to your office — an easy way to do something memorable without the usual event-planning lift.\n\nwant me to send over a quick overview for your next team celebration or holiday event?',
 ];
