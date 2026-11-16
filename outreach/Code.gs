@@ -18,7 +18,7 @@ const CONFIG = {
   WEEKDAYS_ONLY: true,
   DAILY_CAP: 20,        // max emails per day across all leads
   SENDER_NAME: 'Cart Caddies',
-  SIGNATURE: 'cart caddies team\ncartcaddiesfl@gmail.com · cartcaddiesfl.com',
+  SIGNATURE: '**cart caddies team**\ncartcaddiesfl@gmail.com · cartcaddiesfl.com',
 };
 
 const LEAD_HEADERS = ['ready', 'email', 'name', 'company', 'city', 'segment', 'detail',
@@ -333,13 +333,15 @@ function process_(ignoreHours) {
           if (missing.length) { set(r, 'status', 'missing: ' + missing.join(', ')); continue; }
         }
 
-        const body = fill_(next.body, lead) + '\n\n' + CONFIG.SIGNATURE;
+        const text = fill_(next.body, lead) + '\n\n' + CONFIG.SIGNATURE;
+        const plain = text.replace(/\*\*/g, '');   // fallback for mail apps that can't show formatting
+        const html = toHtml_(text);
         if (step === 0) {
-          const message = GmailApp.createDraft(email, fill_(next.subject, lead), body,
-            { name: CONFIG.SENDER_NAME }).send();
+          const message = GmailApp.createDraft(email, fill_(next.subject, lead), plain,
+            { htmlBody: html, name: CONFIG.SENDER_NAME }).send();
           threadId = message.getThread().getId();
         } else {
-          threadId = sendFollowUp_(threadId, email, body);
+          threadId = sendFollowUp_(threadId, email, plain, html);
         }
 
         // write progress right away so a crash can't cause a double send
@@ -373,14 +375,14 @@ function process_(ignoreHours) {
 // ---------- helpers ----------
 
 /** follow-ups go out as a reply in the original thread. */
-function sendFollowUp_(threadId, email, body) {
+function sendFollowUp_(threadId, email, plain, html) {
   const thread = GmailApp.getThreadById(threadId);
-  let draft = thread.createDraftReplyAll(body, { name: CONFIG.SENDER_NAME });
+  let draft = thread.createDraftReplyAll(plain, { htmlBody: html, name: CONFIG.SENDER_NAME });
   // safety check: make sure the reply is addressed to the lead, not back to us
   if (draft.getMessage().getTo().toLowerCase().indexOf(email.toLowerCase()) === -1) {
     draft.deleteDraft();
-    draft = GmailApp.createDraft(email, 're: ' + thread.getFirstMessageSubject(), body,
-      { name: CONFIG.SENDER_NAME });
+    draft = GmailApp.createDraft(email, 're: ' + thread.getFirstMessageSubject(), plain,
+      { htmlBody: html, name: CONFIG.SENDER_NAME });
   }
   return draft.send().getThread().getId();
 }
@@ -391,6 +393,19 @@ function threadOutcome_(thread, me) {
   if (senders.some(f => f.indexOf('mailer-daemon') !== -1 || f.indexOf('postmaster') !== -1)) return 'bounced';
   if (senders.some(f => f.indexOf(me) === -1)) return 'replied';
   return '';
+}
+
+/**
+ * turns template text into a formatted email: blank line = new paragraph with space between,
+ * **double asterisks** = bold. lead details are escaped so odd characters can't break the layout.
+ */
+function toHtml_(text) {
+  const escaped = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const paragraphs = escaped.split(/\n{2,}/).map(block =>
+    '<p style="margin:0 0 16px 0;">' +
+    block.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>') + '</p>');
+  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222;">' +
+    paragraphs.join('') + '</div>';
 }
 
 function loadTemplates_(sheet) {
@@ -458,30 +473,29 @@ function bumpSentToday_() {
 
 const DEFAULT_TEMPLATES = [
   ['planner', 1, 'intro', 0, 'quick intro: Cart Caddies, {{city}} events',
-    'hi {{name}},\n\ni came across {{company}} and loved {{detail}}. most clients end up choosing between planners who all offer the same vendor list. i\'m with Cart Caddies, a luxury party cart, and i\'d love to show you what a "wow" moment on wheels could do for your next proposal, if that\'s useful.\n\nhappy to send over photos and the concept, or grab 15 minutes heading into your next season. no pressure either way.'],
+    'hi {{name}},\n\ni came across {{company}} and loved {{detail}}.\n\nmost clients end up choosing between planners who all offer the same vendor list. i\'m with **Cart Caddies, a luxury party cart**, and i\'d love to show you what **a "wow" moment on wheels** could do for your next proposal, if that\'s useful.\n\nhappy to send over **photos and the concept**, or **grab 15 minutes** heading into your next season. no pressure either way.'],
   ['planner', 2, 'follow-up 1', 2, '',
-    'hi {{name}},\n\nbumping this up in case it got buried. happy to send our concept and photos so you have them on hand. just say the word.'],
+    'hi {{name}},\n\nbumping this up in case it got buried.\n\nhappy to send our **concept and photos** so you have them on hand. just say the word.'],
   ['planner', 3, 'follow-up 2', 3, '',
-    'hi {{name}},\n\none more thought: a party cart is an easy add when a client wants one more memorable moment without more moving parts for you. it arrives ready to go.\n\nworth a quick 15 minutes?'],
+    'hi {{name}},\n\none more thought: a party cart is an easy add when a client wants **one more memorable moment** without more moving parts for you. it arrives ready to go.\n\nworth a **quick 15 minutes**?'],
   ['planner', 4, 'close', 4, '',
-    'hi {{name}},\n\nlast note from me. i won\'t keep filling your inbox. if a party cart ever fits one of your events, we\'d love to be on your vendor list. keep us in mind for next season.'],
+    'hi {{name}},\n\nlast note from me. i won\'t keep filling your inbox.\n\nif a party cart ever fits one of your events, we\'d love to be **on your vendor list**. keep us in mind for next season.'],
 
   ['corporate', 1, 'intro', 0, 'a party cart for {{company}}\'s next team event',
-    'hi {{name}},\n\nmost team events are forgotten by the next Monday. saw {{detail}} and figured this one wouldn\'t be. Cart Caddies is a luxury party cart that comes right to your office, and it adds zero planning to your plate.\n\nwant me to send over a quick overview for your next team celebration or holiday event?'],
+    'hi {{name}},\n\n**most team events are forgotten by the next Monday.** saw {{detail}} and figured this one wouldn\'t be.\n\nCart Caddies is a **luxury party cart that comes right to your office**, and it adds **zero planning** to your plate.\n\nwant me to send over a **quick overview** for your next team celebration or holiday event?'],
   ['corporate', 2, 'follow-up 1', 2, '',
-    'hi {{name}},\n\nbumping this up in case it got buried. happy to send a short overview of how the party cart works for a team event at {{company}}. want it?'],
+    'hi {{name}},\n\nbumping this up in case it got buried.\n\nhappy to send a **short overview** of how the party cart works for a team event at {{company}}. want it?'],
   ['corporate', 3, 'follow-up 2', 3, '',
-    'hi {{name}},\n\none more thought: the cart comes to you, so there\'s no venue to book and nothing for your team to set up. it works for a team celebration, an appreciation day or a holiday event.\n\nopen to a quick overview?'],
+    'hi {{name}},\n\none more thought: the cart comes to you, so there\'s **no venue to book** and **nothing for your team to set up**. it works for a team celebration, an appreciation day or a holiday event.\n\nopen to a **quick overview**?'],
   ['corporate', 4, 'close', 4, '',
-    'hi {{name}},\n\nlast note from me. i won\'t keep filling your inbox. if a party cart sounds right for a future {{company}} event, just reply here and we\'ll take it from there.'],
+    'hi {{name}},\n\nlast note from me. i won\'t keep filling your inbox.\n\nif a party cart sounds right for a future {{company}} event, **just reply here** and we\'ll take it from there.'],
 
   ['residential', 1, 'intro', 0, 'a party cart for {{company}}\'s next resident event',
-    'hi {{name}},\n\n{{company}}\'s amenities caught my eye. looks like a great fit for something a little different for residents. Cart Caddies is a luxury party cart that comes right to the building, an easy way to make a resident event feel special with zero extra lift on your end.\n\nhappy to send details for an upcoming resident event if useful. let me know.'],
+    'hi {{name}},\n\n{{company}}\'s amenities caught my eye. looks like a great fit for something a little different for residents.\n\nCart Caddies is a **luxury party cart that comes right to the building**, an easy way to make a resident event feel special with **zero extra lift** on your end.\n\nhappy to send **details for an upcoming resident event** if useful. let me know.'],
   ['residential', 2, 'follow-up 1', 2, '',
-    'hi {{name}},\n\nbumping this up in case it got buried. happy to send details on how the party cart works for a resident event at {{company}}. want them?'],
+    'hi {{name}},\n\nbumping this up in case it got buried.\n\nhappy to send **details** on how the party cart works for a resident event at {{company}}. want them?'],
   ['residential', 3, 'follow-up 2', 3, '',
-    'hi {{name}},\n\none more thought: the cart comes to the building, so there\'s nothing for your team to set up. it fits a resident mixer, a pool day or a holiday gathering.\n\nopen to seeing the details?'],
+    'hi {{name}},\n\none more thought: the cart comes to the building, so there\'s **nothing for your team to set up**. it fits a resident mixer, a pool day or a holiday gathering.\n\nopen to **seeing the details**?'],
   ['residential', 4, 'close', 4, '',
-    'hi {{name}},\n\nlast note from me. i won\'t keep filling your inbox. if a party cart sounds right for a future resident event at {{company}}, just reply here and we\'ll take it from there.'],
+    'hi {{name}},\n\nlast note from me. i won\'t keep filling your inbox.\n\nif a party cart sounds right for a future resident event at {{company}}, **just reply here** and we\'ll take it from there.'],
 ];
-
