@@ -34,7 +34,9 @@ const STOPPED = ['replied', 'done', 'bounced', 'paused', 'duplicate', 'error'];
 // ---------- menu ----------
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('cart caddies outreach')
+  const ui = ui_();
+  if (!ui) return;
+  ui.createMenu('cart caddies outreach')
     .addItem('1. set up sheet', 'setupSheet')
     .addItem('2. turn on auto-send (hourly)', 'turnOnAutoSend')
     .addSeparator()
@@ -43,6 +45,17 @@ function onOpen() {
     .addItem('send due emails now', 'sendNow')
     .addItem('turn off auto-send', 'turnOffAutoSend')
     .addToUi();
+}
+
+/** the sheet window, or null when a function is run from the Apps Script editor or a timer. */
+function ui_() {
+  try { return SpreadsheetApp.getUi(); } catch (e) { return null; }
+}
+
+/** pop-up when the sheet is open; otherwise just writes to the execution log. */
+function say_(message) {
+  const ui = ui_();
+  if (ui) ui.alert(message); else Logger.log(message);
 }
 
 // ---------- setup ----------
@@ -80,16 +93,18 @@ function setupSheet() {
 
   getOrCreateTab_(ss, 'log', LOG_HEADERS);
   ss.setActiveSheet(leads);
-  SpreadsheetApp.getUi().alert('sheet is set up. next: menu → "2. turn on auto-send".');
+  say_('sheet is set up. next: menu → "2. turn on auto-send".');
 }
 
 /** overwrites the templates tab with the copy in this script. asks first, since edits there are lost. */
 function resetTemplates() {
-  const ui = SpreadsheetApp.getUi();
-  const answer = ui.alert('reset email templates?',
-    'this replaces every email in the templates tab with the latest copy from the script. ' +
-    'any edits you made in that tab will be lost.', ui.ButtonSet.YES_NO);
-  if (answer !== ui.Button.YES) return;
+  const ui = ui_();
+  if (ui) { // asks first when run from the sheet menu; the editor's Run button skips the question
+    const answer = ui.alert('reset email templates?',
+      'this replaces every email in the templates tab with the latest copy from the script. ' +
+      'any edits you made in that tab will be lost.', ui.ButtonSet.YES_NO);
+    if (answer !== ui.Button.YES) return;
+  }
   const sheet = getOrCreateTab_(SpreadsheetApp.getActive(), 'templates', TEMPLATE_HEADERS);
   const extra = sheet.getMaxRows() - 1;
   if (extra > 0) sheet.getRange(2, 1, extra, TEMPLATE_HEADERS.length).clearContent();
@@ -97,7 +112,7 @@ function resetTemplates() {
   sheet.getRange('F2:F').setWrap(true);
   sheet.setColumnWidth(5, 280);
   sheet.setColumnWidth(6, 560);
-  ui.alert('templates updated.');
+  say_('templates updated.');
 }
 
 function getOrCreateTab_(ss, name, headers) {
@@ -117,13 +132,13 @@ function getOrCreateTab_(ss, name, headers) {
 function turnOnAutoSend() {
   turnOffAutoSend_();
   ScriptApp.newTrigger('runOutreach').timeBased().everyHours(1).create();
-  SpreadsheetApp.getUi().alert('auto-send is on. the sheet is checked every hour, ' +
+  say_('auto-send is on. the sheet is checked every hour, ' +
     CONFIG.START_HOUR + ':00–' + CONFIG.END_HOUR + ':00' + (CONFIG.WEEKDAYS_ONLY ? ', weekdays' : '') + '.');
 }
 
 function turnOffAutoSend() {
   turnOffAutoSend_();
-  SpreadsheetApp.getUi().alert('auto-send is off. nothing sends until you turn it back on.');
+  say_('auto-send is off. nothing sends until you turn it back on.');
 }
 
 function turnOffAutoSend_() {
@@ -143,7 +158,7 @@ function runOutreach() {
 
 function moveApprovedNow() {
   dedupeNewLeads_();
-  SpreadsheetApp.getUi().alert(moveApprovedLeads_() + ' lead(s) moved to the leads tab.');
+  say_(moveApprovedLeads_() + ' lead(s) moved to the leads tab.');
 }
 
 /**
@@ -246,7 +261,7 @@ function headerMap_(headerRow) {
 /** menu entry point: ignores business hours, still respects the daily cap. */
 function sendNow() {
   const sent = process_(true);
-  SpreadsheetApp.getUi().alert(sent + ' email(s) sent.');
+  say_(sent + ' email(s) sent.');
 }
 
 function process_(ignoreHours) {
