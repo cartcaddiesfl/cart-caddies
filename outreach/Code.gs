@@ -28,7 +28,7 @@ const INBOX_HEADERS = ['approve', 'name', 'email', 'company', 'city', 'segment',
 const INBOX_FIELDS = ['name', 'email', 'company', 'city', 'segment', 'instagram', 'website'];
 const TEMPLATE_HEADERS = ['segment', 'step', 'label', 'wait days', 'subject', 'body'];
 const LOG_HEADERS = ['time', 'email', 'segment', 'step', 'label'];
-const SEGMENTS = ['planner', 'corporate', 'residential'];
+const SEGMENTS = ['planner', 'corporate', 'residential', 'fitness'];
 const STOPPED = ['replied', 'done', 'bounced', 'paused', 'duplicate', 'error'];
 
 // ---------- menu ----------
@@ -89,6 +89,16 @@ function setupSheet() {
     templates.getRange('F2:F').setWrap(true);
     templates.setColumnWidth(5, 280);
     templates.setColumnWidth(6, 560);
+  } else {
+    // newer script versions can add a segment: append its emails, never touch rows you already have
+    const have = {};
+    templates.getRange(2, 1, templates.getLastRow() - 1, 1).getValues()
+      .forEach(r => { have[String(r[0]).trim().toLowerCase()] = true; });
+    const missing = DEFAULT_TEMPLATES.filter(t => !have[t[0]]);
+    if (missing.length) {
+      templates.getRange(templates.getLastRow() + 1, 1, missing.length, TEMPLATE_HEADERS.length).setValues(missing);
+      templates.getRange('F2:F').setWrap(true);
+    }
   }
 
   getOrCreateTab_(ss, 'log', LOG_HEADERS);
@@ -498,4 +508,10 @@ const DEFAULT_TEMPLATES = [
     'hi {{name}},\n\none more thought: the cart comes to the building, so there\'s **nothing for your team to set up**. it fits a resident mixer, a pool day or a holiday gathering.\n\nopen to **seeing the details**?'],
   ['residential', 4, 'close', 4, '',
     'hi {{name}},\n\nlast note from me. i won\'t keep filling your inbox.\n\nif a party cart sounds right for a future resident event at {{company}}, **just reply here** and we\'ll take it from there.'],
+
+  // fitness: copy from section 3c. hand-picked studios only: set promo terms for a studio before ticking ready.
+  ['fitness', 1, 'intro', 0, 'a moment {{company}} members will post about',
+    'hey {{company}}!\n\n**members remember how a studio makes them feel**, not just the workout. love what you\'re doing with {{detail}}.\n\ni\'m with **Cart Caddies, a luxury party cart**, and i\'d love to talk about giving {{company}}\'s members **a moment they\'ll actually post about**.\n\nwould you be open to a **quick chat** about what that could look like?'],
+  ['fitness', 2, 'follow-up 1', 5, '',
+    'hey {{company}},\n\nbumping this up in case it got buried.\n\nstill love what you\'re doing with {{detail}}. happy to **chat or send a quick overview**, whichever is easier for you.'],
 ];
